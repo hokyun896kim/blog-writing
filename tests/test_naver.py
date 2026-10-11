@@ -69,3 +69,28 @@ def test_prompts_include_inputs():
     assert "키워드X" in user and "스타일Y" in user and "본문내용" in user
     _, user = prompts.draft("k", "", "", "경험Z", "", "보통", 7)
     assert "경험Z" in user and "총 7장" in user
+
+
+def test_unique_sources_and_citable():
+    sources = [
+        {"title": "A", "link": "https://blog.naver.com/a/1?fromRss=true"},
+        {"title": "A2", "link": "https://blog.naver.com/a/1"},
+        {"title": "뉴스", "link": "https://news.example.com/x/"},
+        {"title": "뉴스2", "link": "https://news.example.com/x"},
+    ]
+    assert [s["title"] for s in prompts.unique_sources(sources)] == ["A", "뉴스"]
+    _, user = prompts.draft("k", "", "", "", "", "보통", 6, sources=sources)
+    assert "news.example.com" in user and "blog.naver.com" not in user
+    _, user = prompts.draft("k", "", "", "", "", "보통", 6)
+    assert "출처 링크를 달지 마세요" in user
+
+
+def test_plan_and_request_flow_into_prompts():
+    _, user = prompts.plan("k", "", "", "경험A", "요청B", "보통")
+    assert "경험A" in user and "요청B" in user
+    _, user = prompts.draft("k", "", "", "", "", "보통", 6, plan_text="계획C")
+    assert "<approved_plan>" in user and "계획C" in user
+    _, user = prompts.draft("k", "", "", "", "", "보통", 6)
+    assert "<approved_plan>" not in user
+    _, user = prompts.review("k", "", "", "", "초안", "요청D")
+    assert "요청D" in user and "요청·경험 반영" in user

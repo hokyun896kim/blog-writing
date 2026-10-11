@@ -70,18 +70,11 @@ def research(keyword: str, posts: list[Post], style: str) -> tuple[str, str]:
     return BASE_SYSTEM, user
 
 
-def draft(
-    keyword: str,
-    style: str,
-    prep: str,
-    experience: str,
-    request: str,
-    length: str,
-    image_count: int,
-) -> tuple[str, str]:
-    user = f"""키워드 「{keyword}」로 네이버 블로그 글 초안을 써 주세요.
+REPEAT_WATCH = "'다만', '확인하세요', '~가 아니에요', '확정할 수 없어요', '~거든요', '정말', '꼭'"
 
-<my_blog_style>
+
+def _context(style: str, prep: str, experience: str, request: str) -> str:
+    return f"""<my_blog_style>
 {style or "(진단된 스타일 없음: 친근한 존댓말의 정보형 블로그 글로 작성)"}
 </my_blog_style>
 
@@ -95,15 +88,78 @@ def draft(
 
 <my_request>
 {request or "(없음)"}
-</my_request>
+</my_request>"""
+
+
+def unique_sources(sources: list[dict]) -> list[dict]:
+    """같은 주소는 한 번만 남긴다 (쿼리스트링·끝 슬래시 차이는 같은 글로 본다)."""
+    seen, out = set(), []
+    for s in sources:
+        key = s.get("link", "").split("?")[0].rstrip("/")
+        if key and key not in seen:
+            seen.add(key)
+            out.append(s)
+    return out
+
+
+def _citable(sources: list[dict]) -> str:
+    """본문에 출처로 달 수 있는 자료 (블로그 글은 제외: 다른 블로거 글을 출처로 달지 않는다)."""
+    items = [s for s in unique_sources(sources) if "blog.naver.com" not in s.get("link", "")]
+    if not items:
+        return "(없음: 출처 링크를 달지 마세요)"
+    return "\n".join(f"- {s['title']}: {s['link']}" for s in items)
+
+
+def plan(keyword: str, style: str, prep: str, experience: str, request: str, length: str) -> tuple[str, str]:
+    user = f"""키워드 「{keyword}」 글을 쓰기 전에 문단별 작성 계획을 세워 주세요. 본문은 아직 쓰지 않습니다.
+
+{_context(style, prep, experience, request)}
+
+분량: {length}
+
+다음 형식의 표로 작성하세요.
+
+| 순서 | 소제목 | 이 문단에서 할 말 (2~3줄) | 쓰는 자료 (준비 자료 항목·경험·요청) |
+
+표 아래에 짧게 덧붙이세요.
+- **제목 후보 3개**
+- **요청 반영 계획**: <my_request>의 각 요청이 몇 번 문단에 들어가는지 (요청이 없으면 생략)
+- **경험 배치**: <my_experience>의 각 경험이 몇 번 문단에 들어가는지 (경험이 없으면 '정보형으로 작성')
+"""
+    return BASE_SYSTEM, user
+
+
+def draft(
+    keyword: str,
+    style: str,
+    prep: str,
+    experience: str,
+    request: str,
+    length: str,
+    image_count: int,
+    plan_text: str = "",
+    sources: list[dict] | None = None,
+) -> tuple[str, str]:
+    plan_block = f"\n<approved_plan>\n{plan_text}\n</approved_plan>\n" if plan_text else ""
+    plan_rule = "- <approved_plan>의 문단 순서와 문단별 내용을 따릅니다.\n" if plan_text else ""
+    user = f"""키워드 「{keyword}」로 네이버 블로그 글 초안을 써 주세요.
+
+{_context(style, prep, experience, request)}
+{plan_block}
+<citable_sources>
+{_citable(sources or [])}
+</citable_sources>
 
 작성 원칙
-- 「초안 작성 규칙」과 어조·어투를 그대로 따라, 블로그 주인이 직접 쓴 것처럼 씁니다.
+{plan_rule}- 「초안 작성 규칙」과 어조·어투를 그대로 따라, 블로그 주인이 직접 쓴 것처럼 씁니다.
 - 경험담은 <my_experience>에 있는 내용만 1인칭 경험으로 씁니다. 없는 경험(구매·방문·사용)을 지어내지 마세요.
-- 준비 자료의 핵심 정보와 차별화 방향을 빠짐없이 반영하고, <my_request>가 있으면 반드시 반영합니다.
+- 경험이 있으면 정보를 나열하지 말고 '그때 상황 → 본 것 → 그래서 내린 판단' 흐름으로 풀어 씁니다.
+- 준비 자료의 핵심 정보와 차별화 방향을 빠짐없이 반영하고, <my_request>의 요청은 하나도 빠뜨리지 않습니다.
+- 근거가 있는 내용은 돌려 말하지 말고 구체적으로 바로 설명합니다. {REPEAT_WATCH} 같은 표현이 반복되지 않게 합니다. (가격·날짜·안전 조건 같은 꼭 필요한 주의는 유지)
 - 확실하지 않은 가격·날짜·수치는 [확인 필요: 무엇을] 으로 표시합니다.
 - 키워드는 제목과 도입부에 자연스럽게 넣고, 본문에 억지로 반복하지 않습니다.
 - 사진이 들어갈 자리에 [사진: 어떤 장면] 을 넣습니다.
+- 출처는 <citable_sources>에 있는 것만, 처음 사용한 위치에 한 번만 링크합니다. 같은 링크를 두 번 달지 않습니다.
 - 분량: {length}
 
 출력 형식
@@ -113,25 +169,17 @@ def draft(
 ---
 **태그**: #태그1 #태그2 … (8~15개)
 
-**이미지 생성 프롬프트** (대표 이미지 포함 총 {image_count}장, 번호 목록, 각 줄은 이미지 생성 AI에 바로 붙여 넣을 수 있는 한 문장)
+**이미지 생성 프롬프트** (대표 이미지 포함 정확히 총 {image_count}장, 번호 목록, 각 줄은 이미지 생성 AI에 바로 붙여 넣을 수 있는 한 문장)
 """
     return BASE_SYSTEM, user
 
 
-def review(keyword: str, style: str, prep: str, experience: str, draft_text: str) -> tuple[str, str]:
+def review(
+    keyword: str, style: str, prep: str, experience: str, draft_text: str, request: str = ""
+) -> tuple[str, str]:
     user = f"""키워드 「{keyword}」 글의 초안을 발행 전에 검수해 주세요.
 
-<my_blog_style>
-{style or "(없음)"}
-</my_blog_style>
-
-<prepared_research>
-{prep or "(없음)"}
-</prepared_research>
-
-<my_experience>
-{experience or "(입력 없음)"}
-</my_experience>
+{_context(style, prep, experience, request)}
 
 <draft>
 {draft_text}
@@ -142,13 +190,15 @@ def review(keyword: str, style: str, prep: str, experience: str, draft_text: str
 ## 검수 결과
 1. 사실·수치: 준비 자료와 다르거나 근거 없는 내용, [확인 필요] 목록
 2. 경험의 진실성: <my_experience>에 없는 경험을 지어낸 부분
-3. 스타일 일치: 어조·종결어미·문단 습관이 내 블로그와 맞는지
-4. 반복 표현: 같은 어미·접속사·표현이 반복되는 곳 ('다만', '확인하세요', '~거든요' 등)
-5. 검색 의도 충족: 독자가 궁금한 것을 다 답했는지, 빠진 핵심 정보
-6. 키워드 배치: 제목·도입부·소제목, 과도한 반복 여부
-7. 가독성: 너무 긴 문단·문장, 소제목 흐름
+3. 요청·경험 반영: <my_request>의 요청과 <my_experience>의 경험이 각각 본문 어디에 들어갔는지, 빠진 것
+4. 스타일 일치: 어조·종결어미·문단 습관이 내 블로그와 맞는지
+5. 반복 표현: 같은 어미·접속사·표현이 반복되는 곳 ({REPEAT_WATCH} 등)
+6. 검색 의도 충족: 독자가 궁금한 것을 다 답했는지, 빠진 핵심 정보
+7. 키워드 배치: 제목·도입부·소제목, 과도한 반복 여부
+8. 가독성·출처: 너무 긴 문단·문장, 소제목 흐름, 중복된 출처 링크
 
 그다음 한 줄에 정확히 {FINAL_MARKER} 라고 쓰고, 검수 결과를 모두 반영한 최종본 전체를 초안과 같은 형식(제목, 본문, 태그, 이미지 프롬프트)으로 쓰세요.
+3번에서 빠진 요청·경험은 준비 자료와 입력 범위 안에서 채워 넣습니다.
 확인되지 않은 사실은 지어내서 채우지 말고 [확인 필요] 표시를 남겨 두세요.
 """
     return BASE_SYSTEM, user

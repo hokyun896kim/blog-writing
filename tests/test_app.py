@@ -18,7 +18,10 @@ def app(tmp_path, monkeypatch):
             yield "## 초안 작성 규칙\n1. 해요체"
         elif "준비 자료를 만들어" in user:
             yield "## 검색 의도\n코스"
+        elif "작성 계획을 세워" in user:
+            yield "| 1 | 도입 | … | 경험 |"
         elif "초안을 써 주세요" in user:
+            assert "<approved_plan>" in user
             yield "# 제목\n본문 초안"
         else:
             yield f"## 검수 결과\n✅ 문제 없음\n{prompts.FINAL_MARKER}\n# 제목\n최종 본문 [확인 필요: 가격]"
@@ -55,7 +58,14 @@ def test_full_flow(app):
     assert at.session_state.keyword == "제주 여행"
     assert "검색 의도" in at.session_state.prep
 
+    click(at, "작성 계획 만들기")
+    assert "도입" in at.session_state.plan
+
+    next(sl for sl in at.slider if sl.label.startswith("이미지 프롬프트 수")).set_value(8)
+    at.run()
     click(at, "초안 작성")
+    from blogwriter import storage
+    assert storage.load("prefs")["image_count"] == 8
     assert "본문 초안" in at.session_state.draft
 
     click(at, "검수 시작")

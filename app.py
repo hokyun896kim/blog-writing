@@ -16,7 +16,7 @@ st.set_page_config(page_title="블로그 글쓰기 도우미", page_icon="✍️
 SS = st.session_state
 for key, default in {
     "style": "", "style_blog": "", "keyword": "", "prep": "", "sources": [],
-    "experience": "", "request": "", "draft": "", "review": "", "final": "",
+    "experience": "", "request": "", "plan": "", "draft": "", "review": "", "final": "",
 }.items():
     SS.setdefault(key, default)
 
@@ -93,10 +93,13 @@ def run_stream(system_user: tuple[str, str], effort: str = "high") -> str | None
     return None
 
 
+PROJECT_KEYS = ("prep", "sources", "experience", "request", "plan", "draft", "review", "final")
+
+
 def save_current_project():
     if SS.keyword:
         storage.save_project(SS.keyword, {
-            k: SS[k] for k in ("prep", "sources", "experience", "request", "draft", "review", "final")
+            k: SS[k] for k in PROJECT_KEYS
         })
 
 
@@ -177,8 +180,8 @@ with tab_prep:
             text = run_stream(prompts.research(keyword, posts, SS.style))
             if text:
                 SS.keyword, SS.prep = keyword, text
-                SS.sources = [{"title": p.title, "link": p.link} for p in posts]
-                SS.draft = SS.review = SS.final = ""
+                SS.sources = prompts.unique_sources([{"title": p.title, "link": p.link} for p in posts])
+                SS.plan = SS.draft = SS.review = SS.final = ""
                 save_current_project()
 
     if SS.prep:
@@ -211,10 +214,25 @@ with tab_draft:
     SS.request = st.text_area("나만의 작성 요청 (선택)", SS.request, height=80, placeholder="예: 비용 정리 표를 넣어 줘, 마지막에 체크리스트")
     c1, c2 = st.columns(2)
     length = c1.select_slider("분량", ["짧게 (1,500자 내외)", "보통 (2,500자 내외)", "길게 (4,000자 이상)"], value="보통 (2,500자 내외)")
-    images = c2.slider("이미지 프롬프트 수", 5, 10, 6)
+    prefs = storage.load("prefs", {})
+    images = c2.slider("이미지 프롬프트 수 (대표 이미지 포함)", 5, 10, prefs.get("image_count", 6))
+
+    with st.expander("📝 문단별 작성 계획 (선택 — 먼저 계획을 보고 고친 뒤 초안을 쓰면 요청·경험이 빠지지 않아요)", expanded=bool(SS.plan)):
+        if st.button("작성 계획 만들기", disabled=not kw):
+            text = run_stream(prompts.plan(kw, SS.style, SS.prep, SS.experience, SS.request, length), effort="medium")
+            if text:
+                SS.keyword, SS.plan = kw, text
+                save_current_project()
+        if SS.plan:
+            SS.plan = st.text_area("plan", SS.plan, height=300, label_visibility="collapsed")
+            st.caption("이 계획대로 초안을 씁니다. 필요 없으면 내용을 모두 지우세요.")
 
     if st.button("초안 작성", type="primary", disabled=not kw):
-        text = run_stream(prompts.draft(kw, SS.style, SS.prep, SS.experience, SS.request, length, images))
+        storage.save("prefs", {**prefs, "image_count": images})
+        text = run_stream(prompts.draft(
+            kw, SS.style, SS.prep, SS.experience, SS.request, length, images,
+            plan_text=SS.plan, sources=SS.sources,
+        ))
         if text:
             SS.keyword, SS.draft = kw, text
             SS.review = SS.final = ""
@@ -237,9 +255,9 @@ with tab_review:
     if not SS.draft:
         st.info("③ 초안 작성을 먼저 진행하세요.")
     else:
-        st.write("사실·수치, 지어낸 경험, 스타일 일치, 반복 표현, 검색 의도, 키워드 배치, 가독성을 점검하고 반영한 최종본을 만듭니다.")
+        st.write("사실·수치, 지어낸 경험, 요청·경험 반영, 스타일 일치, 반복 표현, 검색 의도, 키워드 배치, 가독성·출처를 점검하고 반영한 최종본을 만듭니다.")
         if st.button("검수 시작", type="primary"):
-            text = run_stream(prompts.review(SS.keyword, SS.style, SS.prep, SS.experience, SS.draft))
+            text = run_stream(prompts.review(SS.keyword, SS.style, SS.prep, SS.experience, SS.draft, SS.request))
             if text:
                 SS.review, SS.final = prompts.split_review(text)
                 save_current_project()
@@ -272,6 +290,6 @@ with tab_saved:
         c1.markdown(f"**{p['keyword']}** · {stage} · {p.get('updated', '')}")
         if c2.button("불러오기", key=f"load_{i}"):
             SS.keyword = p["keyword"]
-            for k in ("prep", "sources", "experience", "request", "draft", "review", "final"):
+            for k in PROJECT_KEYS:
                 SS[k] = p.get(k, [] if k == "sources" else "")
             st.rerun()
