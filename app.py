@@ -9,7 +9,7 @@ import os
 
 import streamlit as st
 
-from blogwriter import llm, naver, prompts, storage
+from blogwriter import keywords, llm, naver, prompts, storage
 
 st.set_page_config(page_title="블로그 글쓰기 도우미", page_icon="✍️", layout="wide")
 
@@ -17,6 +17,7 @@ SS = st.session_state
 for key, default in {
     "style": "", "style_blog": "", "keyword": "", "prep": "", "sources": [],
     "experience": "", "request": "", "plan": "", "draft": "", "review": "", "final": "",
+    "kw_stats": [],
 }.items():
     SS.setdefault(key, default)
 
@@ -46,10 +47,15 @@ with st.sidebar:
         "네이버 Client Secret", type="password",
         value=settings.get("naver_secret", os.environ.get("NAVER_CLIENT_SECRET", "")),
     )
+    with st.expander("🔑 검색광고 API (키워드 카드용, 선택)", expanded=bool(settings.get("ad_customer"))):
+        st.caption("searchad.naver.com → 도구 → API 사용 관리에서 발급 (무료)")
+        ad_customer = st.text_input("고객 ID (CUSTOMER_ID)", value=settings.get("ad_customer", os.environ.get("NAVER_AD_CUSTOMER_ID", "")))
+        ad_key = st.text_input("액세스 라이선스", type="password", value=settings.get("ad_key", os.environ.get("NAVER_AD_API_KEY", "")))
+        ad_secret = st.text_input("비밀키", type="password", value=settings.get("ad_secret", os.environ.get("NAVER_AD_SECRET_KEY", "")))
     remember = st.checkbox("이 PC에 저장 (data/settings.json)", value=bool(settings))
 
     c1, c2 = st.columns(2)
-    if c1.button("연결 확인", use_container_width=True):
+    if c1.button("연결 확인", width="stretch"):
         try:
             llm.check_connection(llm.make_client(claude_key), model)
             st.success("Claude 연결 OK")
@@ -60,9 +66,18 @@ with st.sidebar:
             st.success("네이버 검색 API OK")
         except Exception as e:
             st.error(f"네이버: {e}")
-    if c2.button("저장", use_container_width=True):
+        if ad_customer or ad_key or ad_secret:
+            try:
+                keywords.SearchAd(ad_customer, ad_key, ad_secret).related(["블로그"])
+                st.success("검색광고 API OK")
+            except Exception as e:
+                st.error(f"검색광고: {e}")
+    if c2.button("저장", width="stretch"):
         if remember:
-            storage.save("settings", {"claude_key": claude_key, "naver_id": naver_id, "naver_secret": naver_secret})
+            storage.save("settings", {
+                "claude_key": claude_key, "naver_id": naver_id, "naver_secret": naver_secret,
+                "ad_customer": ad_customer, "ad_key": ad_key, "ad_secret": ad_secret,
+            })
             st.success("저장했습니다.")
         else:
             storage.save("settings", {})
@@ -106,8 +121,8 @@ def save_current_project():
 st.title("✍️ 블로그 글쓰기 도우미")
 st.caption("내 블로그 스타일 진단 → 상위 글 분석 → 초안 작성 → 최종 검수. AI 결과는 발행 전에 꼭 직접 확인하세요.")
 
-tab_style, tab_prep, tab_draft, tab_review, tab_saved = st.tabs(
-    ["① 내 블로그 스타일 진단", "② 글 작성 준비", "③ 초안 작성", "④ 최종 검수", "📁 저장된 작업"]
+tab_style, tab_kw, tab_prep, tab_draft, tab_review, tab_saved = st.tabs(
+    ["① 내 블로그 스타일 진단", "🔎 키워드 탐색", "② 글 작성 준비", "③ 초안 작성", "④ 최종 검수", "📁 저장된 작업"]
 )
 
 # ---------------------------------------------------------------- ① 스타일 진단
@@ -148,6 +163,115 @@ with tab_style:
             SS.style = edited
             storage.save("style", {"blog_id": SS.style_blog, "text": edited})
             st.success("저장했습니다.")
+
+# ---------------------------------------------------------------- 키워드 탐색
+
+
+def keyword_card(title: str, value: str, color: str = "#e5e7eb", badge: bool = False) -> str:
+    body = (
+        f'<span style="background:{color};color:#fff;padding:2px 10px;border-radius:999px">{value}</span>'
+        if badge else value
+    )
+    return (
+        f'<div style="border:2px solid {color};border-radius:12px;padding:12px 14px;height:100%">'
+        f'<div style="font-size:0.85rem;opacity:0.7">{title}</div>'
+        f'<div style="font-size:1.4rem;font-weight:700;margin-top:4px">{body}</div></div>'
+    )
+
+
+with tab_kw:
+    st.subheader("키워드 탐색")
+    st.write("기준 키워드의 **연관 키워드**와 월 검색량(네이버 검색광고), 블로그 문서 수(네이버 검색)를 모아 등급을 매깁니다.")
+    c1, c2, c3 = st.columns([3, 1, 1])
+    seeds_text = c1.text_input("기준 키워드 (쉼표로 최대 5개)", placeholder="예: 제주여행, 제주 가족여행")
+    doc_limit = c2.number_input("문서 수 조회 개수", 5, 50, 20, step=5, help="검색량 상위 N개만 문서 수를 조회합니다 (검색 API 호출 수 = N)")
+    hide_low = c3.checkbox("검색 적음 숨기기", value=True)
+
+    if st.button("키워드 탐색", type="primary", disabled=not seeds_text.strip()):
+        try:
+            seeds = [x.strip() for x in seeds_text.split(",") if x.strip()]
+            stats = keywords.SearchAd(ad_customer, ad_key, ad_secret).related(seeds)
+            stats.sort(key=lambda k: k.monthly or 0, reverse=True)
+            if hide_low:
+                stats = [k for k in stats if (k.monthly or 0) >= keywords.MIN_MONTHLY]
+            bar = st.progress(0.0, text="블로그 문서 수 조회 중…")
+            errors = keywords.fill_docs(
+                stats[: int(doc_limit)], naver_id, naver_secret,
+                on_progress=lambda i, n: bar.progress(i / n, text=f"블로그 문서 수 조회 중… {i}/{n}"),
+            )
+            bar.empty()
+            if errors:
+                st.warning(f"문서 수를 못 가져온 키워드 {len(errors)}개는 '미확인'으로 표시합니다.\n\n" + errors[0])
+            SS.kw_stats = stats
+        except Exception as e:
+            st.error(f"탐색 실패: {e}")
+
+    stats = SS.kw_stats
+    if stats:
+        rows = [
+            {
+                "키워드": k.keyword, "월 검색량": k.monthly_text, "블로그 문서수": keywords.fmt_int(k.docs),
+                "비율": keywords.fmt_ratio(k.ratio), "등급": k.grade.label,
+                "PC": keywords.fmt_int(k.pc), "모바일": keywords.fmt_int(k.mobile), "광고 경쟁": k.competition,
+            }
+            for k in stats
+        ]
+        card_area = st.container()
+        st.caption(f"연관 키워드 {len(stats)}개 · 표에서 행을 고르면 위 카드가 바뀝니다")
+        event = st.dataframe(rows, hide_index=True, width="stretch", on_select="rerun", selection_mode="single-row", key="kw_table")
+        sel_rows = event.selection.rows if event and event.selection else []
+        chosen = stats[sel_rows[0]] if sel_rows else stats[0]
+
+        with card_area:
+            g = chosen.grade
+            st.markdown(f"#### {chosen.keyword}")
+            cols = st.columns(4)
+            cols[0].markdown(keyword_card("월 검색량", chosen.monthly_text), unsafe_allow_html=True)
+            cols[1].markdown(keyword_card("블로그 문서수", keywords.fmt_int(chosen.docs)), unsafe_allow_html=True)
+            cols[2].markdown(keyword_card("비율 (문서수 ÷ 검색량)", keywords.fmt_ratio(chosen.ratio)), unsafe_allow_html=True)
+            cols[3].markdown(keyword_card("키워드 등급", g.label, g.color, badge=True), unsafe_allow_html=True)
+            st.caption(f"{g.label}: {g.hint}")
+
+            b1, b2, b3 = st.columns(3)
+            if b1.button("이 키워드로 글 준비 →", type="primary", width="stretch"):
+                SS.keyword = chosen.keyword
+                st.success(f"「{chosen.keyword}」를 ② 글 작성 준비 탭에 넣었습니다.")
+            if b2.button("⭐ 보관", width="stretch"):
+                saved_kw = storage.load("saved_keywords", [])
+                saved_kw = [x for x in saved_kw if x["keyword"] != chosen.keyword]
+                saved_kw.insert(0, {
+                    "keyword": chosen.keyword, "monthly": chosen.monthly_text, "docs": keywords.fmt_int(chosen.docs),
+                    "ratio": keywords.fmt_ratio(chosen.ratio), "grade": g.label,
+                })
+                storage.save("saved_keywords", saved_kw)
+                st.success("보관했습니다.")
+            if chosen.docs is None and b3.button("문서 수 조회", width="stretch"):
+                errors = keywords.fill_docs([chosen], naver_id, naver_secret)
+                if errors:
+                    st.error(errors[0])
+                else:
+                    st.rerun()
+
+        with st.expander("등급 기준"):
+            st.markdown(
+                f"- 비율 = 블로그 문서수 ÷ 월 검색량(PC+모바일). 낮을수록 찾는 사람에 비해 글이 적습니다.\n"
+                f"- **A 기회** < 0.5 · **B 좋음** < 2 · **C 보통** < 10 · **D 포화** ≥ 10\n"
+                f"- 월 검색량 {keywords.MIN_MONTHLY} 미만은 **E 검색 적음**, 수치를 못 가져오면 **미확인** (임의로 채우지 않음)\n"
+                f"- 비율과 등급은 참고용이며 **검색 상위노출 확률이 아닙니다.**"
+            )
+
+    saved_kw = storage.load("saved_keywords", [])
+    if saved_kw:
+        with st.expander(f"⭐ 보관한 키워드 ({len(saved_kw)})"):
+            for i, item in enumerate(saved_kw):
+                c1, c2, c3 = st.columns([5, 1, 1])
+                c1.markdown(f"**{item['keyword']}** · {item['grade']} · 검색 {item['monthly']} · 문서 {item['docs']} · 비율 {item['ratio']}")
+                if c2.button("글 준비", key=f"kw_use_{i}"):
+                    SS.keyword = item["keyword"]
+                    st.success(f"「{item['keyword']}」를 ② 탭에 넣었습니다.")
+                if c3.button("삭제", key=f"kw_del_{i}"):
+                    storage.save("saved_keywords", saved_kw[:i] + saved_kw[i + 1:])
+                    st.rerun()
 
 # ---------------------------------------------------------------- ② 글 작성 준비
 
