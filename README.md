@@ -30,6 +30,31 @@
 
 ## 설치와 실행
 
+### 방법 A. Windows에서 더블클릭으로 (추천)
+1. **Python 설치** — https://www.python.org/downloads → 설치 첫 화면에서 **"Add Python to PATH" 체크** 후 Install
+2. **프로그램 받기** — 이 페이지 위쪽 초록색 **Code → Download ZIP** → 받은 파일 우클릭 → **압축 풀기**
+3. 압축 푼 폴더에서 **`실행하기.bat` 더블클릭**
+   - 처음에는 필요한 구성요소를 설치하느라 1~3분 걸립니다
+   - "Windows의 PC 보호" 창이 뜨면 **추가 정보 → 실행**
+   - 잠시 뒤 브라우저에 앱 화면이 열립니다 (안 열리면 http://localhost:8501 직접 입력)
+4. 왼쪽 사이드바에 키 입력 → **"이 PC에 저장"** 체크 → **저장** → **연결 확인**
+
+끝낼 때는 검은 창을 닫으면 됩니다. 다음부터는 3번만 하면 됩니다.
+
+> 새 버전으로 바꿀 때: 새 ZIP을 받아 풀고, 예전 폴더의 `data` 폴더(저장한 키·작업)를 새 폴더로 복사하세요.
+
+### 방법 B. 휴대폰에서 인터넷 주소로 (Streamlit Cloud, 무료)
+1. https://share.streamlit.io 접속 → **Continue with GitHub**로 로그인 (이 저장소 접근 허용)
+2. **Create app → Deploy a public app from GitHub**
+   - Repository: `hokyun896kim/blog-writing` · Branch: `main` · Main file path: `app.py`
+   - App URL: 원하는 주소 입력 (예: `my-blog-helper`)
+3. **Advanced settings → Secrets** 칸에 [`.streamlit/secrets.toml.example`](.streamlit/secrets.toml.example) 내용을 붙여 넣고 값을 채웁니다
+   - **`APP_PASSWORD`는 꼭 정하세요.** 주소를 아는 사람이 내 API 키로 글을 쓰지 못하게 잠급니다
+4. **Deploy** → 몇 분 뒤 나온 주소를 휴대폰 사파리로 열고, 홈 화면에 추가하면 앱처럼 쓸 수 있습니다
+
+> 클라우드에서는 앱이 잠들거나 다시 시작될 때 **저장한 작업(data 폴더)이 지워질 수 있습니다.** 최종본은 바로 복사하거나 내려받아 두세요. 키는 Secrets에 있으니 다시 넣을 필요가 없습니다.
+
+### 방법 C. 직접 명령어로 (개발자용)
 ```bash
 git clone https://github.com/hokyun896kim/blog-writing.git
 cd blog-writing
@@ -38,9 +63,6 @@ source .venv/bin/activate        # Windows: .venv\Scripts\activate
 pip install -r requirements.txt
 streamlit run app.py
 ```
-
-브라우저가 열리면 왼쪽 **연결 설정**에 키를 넣고 **연결 확인**을 누르세요.
-(키를 매번 넣기 싫으면 `.env.example`처럼 환경변수로 두거나 "이 PC에 저장"을 체크하세요.)
 
 ## 키워드 카드 읽는 법
 
