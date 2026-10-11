@@ -67,8 +67,7 @@ def normalize_blog_id(value: str) -> str:
 
 # ---------------------------------------------------------------- 검색 API
 
-def search_blog(query: str, client_id: str, client_secret: str, display: int = 10) -> list[Post]:
-    """네이버 블로그 검색 API(정확도순) 상위 글 목록."""
+def _search_raw(query: str, client_id: str, client_secret: str, display: int) -> dict:
     if not (client_id and client_secret):
         raise NaverError("네이버 검색 API Client ID / Secret을 먼저 입력하세요.")
     resp = requests.get(
@@ -83,7 +82,17 @@ def search_blog(query: str, client_id: str, client_secret: str, display: int = 1
         except ValueError:
             msg = resp.text
         raise NaverError(f"네이버 검색 API 오류 ({resp.status_code}): {msg}")
-    return parse_search_response(resp.json())
+    return resp.json()
+
+
+def search_blog(query: str, client_id: str, client_secret: str, display: int = 10) -> list[Post]:
+    """네이버 블로그 검색 API(정확도순) 상위 글 목록."""
+    return parse_search_response(_search_raw(query, client_id, client_secret, display))
+
+
+def blog_total(query: str, client_id: str, client_secret: str) -> int:
+    """이 검색어로 나오는 블로그 문서 수 (검색 API의 total)."""
+    return int(_search_raw(query, client_id, client_secret, display=1).get("total", 0))
 
 
 def parse_search_response(data: dict) -> list[Post]:
