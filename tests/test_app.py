@@ -105,3 +105,21 @@ def test_keyword_cards(app, monkeypatch):
     click(at, "⭐ 보관")
     from blogwriter import storage
     assert storage.load("saved_keywords")[0]["keyword"] == "제주여행"
+
+
+def test_password_gate(app, monkeypatch):
+    monkeypatch.setenv("APP_PASSWORD", "secret123")
+    at = app.run()
+    assert not at.tabs  # 잠금 화면에서는 본 화면이 안 보인다
+    field(at, "비밀번호").set_value("wrong")
+    at.run()
+    assert at.error and not at.tabs
+    field(at, "비밀번호").set_value("secret123")
+    at.run()
+    assert not at.exception and len(at.tabs) == 6
+
+
+def test_keys_prefilled_from_env(app, monkeypatch):
+    monkeypatch.setenv("NAVER_AD_CUSTOMER_ID", "2522929")
+    at = app.run()
+    assert field(at, "고객 ID (CUSTOMER_ID)").value == "2522929"

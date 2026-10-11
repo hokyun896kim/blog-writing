@@ -5,6 +5,7 @@
 
 from __future__ import annotations
 
+import hmac
 import os
 
 import streamlit as st
@@ -14,6 +15,29 @@ from blogwriter import keywords, llm, naver, prompts, storage
 st.set_page_config(page_title="블로그 글쓰기 도우미", page_icon="✍️", layout="wide")
 
 SS = st.session_state
+
+
+def secret(name: str) -> str:
+    """Streamlit Cloud의 Secrets → 환경변수 순서로 찾는다. 로컬에 secrets 파일이 없어도 오류 없이 빈 문자열."""
+    try:
+        value = st.secrets.get(name, "")
+    except Exception:  # secrets.toml이 없으면 FileNotFoundError 등
+        value = ""
+    return str(value or os.environ.get(name, ""))
+
+
+# 비밀번호 잠금: APP_PASSWORD가 설정된 경우(인터넷에 올렸을 때)만 동작한다.
+APP_PASSWORD = secret("APP_PASSWORD")
+if APP_PASSWORD and not SS.get("authed"):
+    st.title("✍️ 블로그 글쓰기 도우미")
+    pw = st.text_input("비밀번호", type="password")
+    if pw:
+        if hmac.compare_digest(pw.encode(), APP_PASSWORD.encode()):
+            SS.authed = True
+            st.rerun()
+        st.error("비밀번호가 틀렸습니다.")
+    st.stop()
+
 for key, default in {
     "style": "", "style_blog": "", "keyword": "", "prep": "", "sources": [],
     "experience": "", "request": "", "plan": "", "draft": "", "review": "", "final": "",
@@ -30,28 +54,34 @@ if not SS.style:
 # ---------------------------------------------------------------- 연결 설정
 
 settings = storage.load("settings", {})
+
+
+def default(setting_key: str, secret_name: str) -> str:
+    """입력칸 기본값: 이 PC에 저장한 값 → Secrets/환경변수."""
+    return settings.get(setting_key) or secret(secret_name)
+
 with st.sidebar:
     st.header("⚙️ 연결 설정")
     claude_key = st.text_input(
         "Claude API 키", type="password",
-        value=settings.get("claude_key", os.environ.get("ANTHROPIC_API_KEY", "")),
+        value=default("claude_key", "ANTHROPIC_API_KEY"),
         help="console.anthropic.com 에서 발급. 비워 두면 ANTHROPIC_API_KEY 환경변수를 씁니다.",
     )
     model_label = st.selectbox("모델", list(llm.MODELS), index=0)
     model = llm.MODELS[model_label]
     naver_id = st.text_input(
-        "네이버 Client ID", value=settings.get("naver_id", os.environ.get("NAVER_CLIENT_ID", "")),
+        "네이버 Client ID", value=default("naver_id", "NAVER_CLIENT_ID"),
         help="developers.naver.com → 애플리케이션 등록 → 사용 API: 검색",
     )
     naver_secret = st.text_input(
         "네이버 Client Secret", type="password",
-        value=settings.get("naver_secret", os.environ.get("NAVER_CLIENT_SECRET", "")),
+        value=default("naver_secret", "NAVER_CLIENT_SECRET"),
     )
     with st.expander("🔑 검색광고 API (키워드 카드용, 선택)", expanded=bool(settings.get("ad_customer"))):
         st.caption("searchad.naver.com → 도구 → API 사용 관리에서 발급 (무료)")
-        ad_customer = st.text_input("고객 ID (CUSTOMER_ID)", value=settings.get("ad_customer", os.environ.get("NAVER_AD_CUSTOMER_ID", "")))
-        ad_key = st.text_input("액세스 라이선스", type="password", value=settings.get("ad_key", os.environ.get("NAVER_AD_API_KEY", "")))
-        ad_secret = st.text_input("비밀키", type="password", value=settings.get("ad_secret", os.environ.get("NAVER_AD_SECRET_KEY", "")))
+        ad_customer = st.text_input("고객 ID (CUSTOMER_ID)", value=default("ad_customer", "NAVER_AD_CUSTOMER_ID"))
+        ad_key = st.text_input("액세스 라이선스", type="password", value=default("ad_key", "NAVER_AD_API_KEY"))
+        ad_secret = st.text_input("비밀키", type="password", value=default("ad_secret", "NAVER_AD_SECRET_KEY"))
     remember = st.checkbox("이 PC에 저장 (data/settings.json)", value=bool(settings))
 
     c1, c2 = st.columns(2)
